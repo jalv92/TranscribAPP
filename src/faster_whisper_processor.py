@@ -91,10 +91,24 @@ class FasterWhisperProcessor:
             if not os.path.exists(audio_path):
                 raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-            # Get VAD settings from config
+            # Check audio duration to decide on VAD usage
+            try:
+                from scipy.io import wavfile
+                sample_rate, audio_data = wavfile.read(audio_path)
+                audio_duration = len(audio_data) / sample_rate
+                logger.info(f"Audio duration: {audio_duration:.1f} seconds")
+            except:
+                audio_duration = 999  # Default to long if can't determine
+
+            # Get VAD settings from config, but disable for very short audio
             use_vad = self.config.get('whisper', {}).get('vad_filter', True)
 
-            # Transcribe with optimal settings for speed
+            # Disable VAD for audio shorter than 5 seconds as it's too aggressive
+            if audio_duration < 5.0:
+                use_vad = False
+                logger.info(f"Disabling VAD for short audio ({audio_duration:.1f}s)")
+
+            # First attempt with VAD (if enabled)
             transcribe_params = {
                 "audio": audio_path,
                 "language": "es",  # Force Spanish
@@ -108,11 +122,11 @@ class FasterWhisperProcessor:
             # Only add VAD parameters if VAD is enabled
             if use_vad:
                 transcribe_params["vad_parameters"] = dict(
-                    threshold=0.3,  # Lowered from 0.5 for better speech detection
-                    min_speech_duration_ms=100,  # Lowered from 250ms to catch shorter utterances
+                    threshold=0.2,  # Further lowered from 0.3 for better detection
+                    min_speech_duration_ms=50,  # Further lowered from 100ms
                     max_speech_duration_s=float('inf'),
-                    min_silence_duration_ms=500,  # Reduced from 2000ms to avoid cutting speech too early
-                    speech_pad_ms=600  # Increased from 400ms to preserve more context
+                    min_silence_duration_ms=300,  # Further reduced from 500ms
+                    speech_pad_ms=800  # Further increased from 600ms
                 )
 
             # Add remaining parameters
@@ -130,6 +144,19 @@ class FasterWhisperProcessor:
 
             # Combine all segments
             transcribed_text = " ".join([segment.text.strip() for segment in segments])
+
+            # Check if VAD removed all audio and retry without VAD if needed
+            if use_vad and (not transcribed_text or not transcribed_text.strip()):
+                logger.warning("VAD removed all audio, retrying without VAD filter")
+
+                # Retry without VAD
+                transcribe_params["vad_filter"] = False
+                if "vad_parameters" in transcribe_params:
+                    del transcribe_params["vad_parameters"]
+
+                segments, info = self.model.transcribe(**transcribe_params)
+                transcribed_text = " ".join([segment.text.strip() for segment in segments])
+                logger.info(f"Retry without VAD resulted in: {transcribed_text[:50] if transcribed_text else 'empty'}...")
 
             # Calculate confidence from average log probability
             total_log_prob = 0

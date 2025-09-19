@@ -16,7 +16,7 @@
         "device": "cpu",
         "use_faster": true,
         "beam_size": 1,
-        "vad_filter": true
+        "vad_filter": false
     },
     "translation": {
         "model_name": "Helsinki-NLP/opus-mt-es-en",
