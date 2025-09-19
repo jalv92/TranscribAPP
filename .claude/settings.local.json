@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(python3 -m pip install:*)",
+      "Bash(python test:*)",
+      "Read(//mnt/c/Users/javlo/Documents/**)",
+      "Bash(cd:*)",
+      "WebSearch",
+      "Bash(awk:*)",
+      "Bash(xargs:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Read(//mnt/c/Users/javlo/Downloads/ScreenShot/**)",
+      "Read(//usr/bin/**)",
+      "Bash(./ffmpeg-2025-09-18-git-c373636f55-essentials_build/ffmpeg-2025-09-18-git-c373636f55-essentials_build/bin/ffmpeg.exe -version)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "mcp__github-mcp__search_repositories",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "mcp__github-mcp__push_files",
+      "Bash(git push:*)",
+      "Bash(gh auth:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
