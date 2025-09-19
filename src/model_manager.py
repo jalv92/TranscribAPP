@@ -198,6 +198,11 @@ class ModelManager:
                 if self.use_faster_whisper and self.faster_whisper:
                     transcribed_text, confidence = self.faster_whisper.transcribe(audio_path)
 
+                    # Check if we got any text
+                    if not transcribed_text or not transcribed_text.strip():
+                        logger.warning("No text was transcribed from audio")
+                        return "", 0.0
+
                     # Apply technical terms correction if enabled
                     if self.config.get('quality', {}).get('fix_technical_terms', True):
                         transcribed_text = process_technical_terms(transcribed_text)
@@ -205,18 +210,21 @@ class ModelManager:
 
                     # Clean up Spanish text with LLM or simple processor
                     try:
-                        if self.qwen_processor and self.qwen_processor.is_initialized:
-                            cleaned_text = self.qwen_processor.clean_spanish_text(transcribed_text)
-                            # Validate cleaned text
-                            if 'assistant' in cleaned_text.lower() or cleaned_text.count('\n') > 2:
-                                logger.warning(f"LLM output suspicious, using raw text")
-                                cleaned_text = transcribed_text
+                        if transcribed_text and transcribed_text.strip():  # Only process non-empty text
+                            if self.qwen_processor and self.qwen_processor.is_initialized:
+                                cleaned_text = self.qwen_processor.clean_spanish_text(transcribed_text)
+                                # Validate cleaned text
+                                if 'assistant' in cleaned_text.lower() or cleaned_text.count('\n') > 2:
+                                    logger.warning(f"LLM output suspicious, using raw text")
+                                    cleaned_text = transcribed_text
+                                else:
+                                    logger.info(f"LLM cleaned text: {cleaned_text[:50] if cleaned_text else 'empty'}...")
                             else:
-                                logger.info(f"LLM cleaned text: {cleaned_text[:50]}...")
+                                cleaned_text = self.simple_processor.clean_spanish_text(transcribed_text)
+                                logger.info(f"Simple cleaned text: {cleaned_text[:50] if cleaned_text else 'empty'}...")
+                            return cleaned_text if cleaned_text else transcribed_text, confidence
                         else:
-                            cleaned_text = self.simple_processor.clean_spanish_text(transcribed_text)
-                            logger.info(f"Simple cleaned text: {cleaned_text[:50]}...")
-                        return cleaned_text, confidence
+                            return transcribed_text, confidence
                     except Exception as e:
                         logger.warning(f"Text cleaning failed: {e}, using raw text")
                         return transcribed_text, confidence

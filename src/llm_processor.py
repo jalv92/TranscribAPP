@@ -146,6 +146,11 @@ class UniversalLLMProcessor:
 
     def clean_spanish_text(self, text: str) -> str:
         """Clean and improve Spanish transcription"""
+        # Check for empty or invalid input
+        if not text or not text.strip():
+            logger.warning("Empty text received, skipping LLM processing")
+            return text
+
         if not self.is_initialized:
             logger.warning("LLM not initialized, returning original text")
             return text
@@ -183,8 +188,13 @@ Provide only the corrected text without explanations."""
                 cleaned = response.split("<start_of_turn>model")[-1].strip()
             else:
                 # Find where the instruction ends
-                if text in response:
-                    cleaned = response.split(text)[-1].strip()
+                if text and text in response:
+                    # Only split if text is not empty
+                    parts = response.split(text)
+                    if len(parts) > 1:
+                        cleaned = parts[-1].strip()
+                    else:
+                        cleaned = response.strip()
                 else:
                     cleaned = response.strip()
 

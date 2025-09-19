@@ -91,29 +91,42 @@ class FasterWhisperProcessor:
             if not os.path.exists(audio_path):
                 raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
+            # Get VAD settings from config
+            use_vad = self.config.get('whisper', {}).get('vad_filter', True)
+
             # Transcribe with optimal settings for speed
-            segments, info = self.model.transcribe(
-                audio_path,
-                language="es",  # Force Spanish
-                task="transcribe",  # Don't translate
-                beam_size=1,  # Faster than default 5
-                best_of=1,  # Single pass for speed
-                temperature=0,  # Greedy decoding for speed
-                vad_filter=True,  # Voice Activity Detection - speeds up processing
-                vad_parameters=dict(
-                    threshold=0.5,
-                    min_speech_duration_ms=250,
+            transcribe_params = {
+                "audio": audio_path,
+                "language": "es",  # Force Spanish
+                "task": "transcribe",  # Don't translate
+                "beam_size": self.config.get('whisper', {}).get('beam_size', 1),  # From config
+                "best_of": 1,  # Single pass for speed
+                "temperature": 0,  # Greedy decoding for speed
+                "vad_filter": use_vad,  # Use config setting
+            }
+
+            # Only add VAD parameters if VAD is enabled
+            if use_vad:
+                transcribe_params["vad_parameters"] = dict(
+                    threshold=0.3,  # Lowered from 0.5 for better speech detection
+                    min_speech_duration_ms=100,  # Lowered from 250ms to catch shorter utterances
                     max_speech_duration_s=float('inf'),
-                    min_silence_duration_ms=2000,
-                    speech_pad_ms=400
-                ),
-                word_timestamps=False,  # Disable for speed
-                condition_on_previous_text=False,  # Faster but may reduce quality slightly
-                compression_ratio_threshold=2.4,
-                log_prob_threshold=-1.0,
-                no_speech_threshold=0.6,
-                initial_prompt=None  # Can add context here if needed
-            )
+                    min_silence_duration_ms=500,  # Reduced from 2000ms to avoid cutting speech too early
+                    speech_pad_ms=600  # Increased from 400ms to preserve more context
+                )
+
+            # Add remaining parameters
+            transcribe_params.update({
+                "word_timestamps": False,  # Disable for speed
+                "condition_on_previous_text": False,  # Faster but may reduce quality slightly
+                "compression_ratio_threshold": 2.4,
+                "log_prob_threshold": -1.0,
+                "no_speech_threshold": 0.6,
+                "initial_prompt": None  # Can add context here if needed
+            })
+
+            # Perform transcription
+            segments, info = self.model.transcribe(**transcribe_params)
 
             # Combine all segments
             transcribed_text = " ".join([segment.text.strip() for segment in segments])
