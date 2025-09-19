@@ -343,6 +343,35 @@ class TranscribeApp:
                 self.audio_recorder.set_input_device(device_id)
                 logger.info(f"Audio input device set to: {device_id}")
 
+        # Apply LLM configuration changes
+        llm_enabled = self.config.get('llm', {}).get('enabled', True)
+        if self.model_manager:
+            self.model_manager.config = self.config
+
+            # If LLM was disabled, clean up the Qwen processor
+            if not llm_enabled and self.model_manager.qwen_processor:
+                logger.info("Disabling Qwen2.5-3B LLM enhancement")
+                self.model_manager.qwen_processor = None
+
+                # Force garbage collection to free memory
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    import torch
+                    torch.cuda.empty_cache()
+                logger.info("LLM memory freed")
+
+            # If LLM was enabled and not loaded, offer to load it
+            elif llm_enabled and not self.model_manager.qwen_processor:
+                logger.info("LLM enhancement enabled but model not loaded")
+                # Note: We don't auto-load here as it's resource intensive
+                # User will get the enhancement on next app restart
+
+        # Update tray menu to reflect AI status
+        if self.tray_app and self.tray_app.icon:
+            self.tray_app.icon.menu = self.tray_app.setup_menu()
+            logger.info(f"Tray menu updated - AI Enhancement: {'ON' if llm_enabled else 'OFF'}")
+
     def run(self):
         logger.info("Starting TranscribeApp...")
 

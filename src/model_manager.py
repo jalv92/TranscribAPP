@@ -1,31 +1,52 @@
-import whisper
-from transformers import pipeline, MarianMTModel, MarianTokenizer
-import torch
 import logging
+import torch
 import time
 import threading
 from typing import Optional, Tuple
 import os
 import gc
-from src.simple_text_processor import get_simple_processor
-from src.qwen_processor import get_qwen_processor
-from src.technical_terms import process_technical_terms
+from transformers import pipeline, MarianMTModel, MarianTokenizer
 
 logger = logging.getLogger(__name__)
+
+# Try to use faster-whisper first, fallback to OpenAI whisper
+try:
+    from src.faster_whisper_processor import get_faster_whisper_processor, FASTER_WHISPER_AVAILABLE
+    USE_FASTER_WHISPER = FASTER_WHISPER_AVAILABLE
+    if USE_FASTER_WHISPER:
+        logger.info("Using Faster-Whisper for 4x speed improvement")
+except ImportError:
+    USE_FASTER_WHISPER = False
+    logger.info("Faster-Whisper not available, using OpenAI Whisper")
+
+if not USE_FASTER_WHISPER:
+    import whisper
+
+from src.simple_text_processor import get_simple_processor
+from src.technical_terms import process_technical_terms
+try:
+    from src.llm_processor import get_universal_processor
+except ImportError:
+    # Fallback to qwen processor if new processor not available
+    from src.qwen_processor import get_qwen_processor
+    get_universal_processor = get_qwen_processor
 
 
 class ModelManager:
     def __init__(self, config: dict):
         self.config = config
         self.whisper_model = None
+        self.faster_whisper = None
         self.translation_pipeline = None
         self.qwen_processor = None
         self.simple_processor = get_simple_processor()
         self.model_lock = threading.Lock()
         self.is_initialized = False
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.use_faster_whisper = USE_FASTER_WHISPER and config.get('whisper', {}).get('use_faster', True)
 
         logger.info(f"ModelManager initialized, using device: {self.device}")
+        logger.info(f"Using {'Faster-Whisper (4x speed)' if self.use_faster_whisper else 'OpenAI Whisper'}")
 
     def initialize_models(self, progress_callback=None) -> bool:
         try:
@@ -41,18 +62,27 @@ class ModelManager:
             if progress_callback:
                 progress_callback("Loading Whisper model...", 0)
 
-            # Load with timeout
-            import concurrent.futures
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            # Load Faster-Whisper or OpenAI Whisper
+            if self.use_faster_whisper:
+                # Use Faster-Whisper for 4x speed
+                self.faster_whisper = get_faster_whisper_processor(self.config)
+                if not self.faster_whisper.initialize(progress_callback):
+                    logger.error("Failed to load Faster-Whisper, falling back to OpenAI Whisper")
+                    self.use_faster_whisper = False
+                    self._load_whisper_model()
+            else:
+                # Use standard OpenAI Whisper
+                import concurrent.futures
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
-            try:
-                future = executor.submit(self._load_whisper_model)
-                future.result(timeout=30)  # 30 second timeout
-            except concurrent.futures.TimeoutError:
-                logger.error("Whisper model loading timed out")
-                raise TimeoutError("Whisper model loading timed out after 30 seconds")
-            finally:
-                executor.shutdown(wait=False)
+                try:
+                    future = executor.submit(self._load_whisper_model)
+                    future.result(timeout=30)  # 30 second timeout
+                except concurrent.futures.TimeoutError:
+                    logger.error("Whisper model loading timed out")
+                    raise TimeoutError("Whisper model loading timed out after 30 seconds")
+                finally:
+                    executor.shutdown(wait=False)
 
             if progress_callback:
                 progress_callback("Loading translation model...", 50)
@@ -62,16 +92,21 @@ class ModelManager:
             if progress_callback:
                 progress_callback("Loading LLM for text enhancement...", 75)
 
-            # Load Qwen2.5-3B if enabled
+            # Load LLM if enabled
             if self.config.get('llm', {}).get('enabled', True):
-                self.qwen_processor = get_qwen_processor()
-                if self.qwen_processor.initialize(progress_callback):
-                    logger.info("Qwen2.5-3B loaded successfully")
+                # Get model path and ID from config
+                model_path = self.config.get('llm', {}).get('model_path', 'LLM/Qwen2.5-3B-Instruct')
+                model_id = self.config.get('llm', {}).get('model_id', 'Qwen2.5-3B-Instruct')
+
+                self.qwen_processor = get_universal_processor()
+                if self.qwen_processor.initialize(model_path, model_id, progress_callback):
+                    logger.info(f"{model_id} loaded successfully")
                 else:
-                    logger.warning("Qwen2.5-3B not available, using simple processor")
+                    logger.warning(f"{model_id} not available, using simple processor")
                     self.qwen_processor = None
             else:
-                logger.info("LLM disabled in config, using simple processor")
+                logger.info("LLM disabled in config, using simple processor only")
+                self.qwen_processor = None
 
             if progress_callback:
                 progress_callback("Models ready", 100)
@@ -159,6 +194,34 @@ class ModelManager:
 
         with self.model_lock:
             try:
+                # Use Faster-Whisper if available
+                if self.use_faster_whisper and self.faster_whisper:
+                    transcribed_text, confidence = self.faster_whisper.transcribe(audio_path)
+
+                    # Apply technical terms correction if enabled
+                    if self.config.get('quality', {}).get('fix_technical_terms', True):
+                        transcribed_text = process_technical_terms(transcribed_text)
+                        logger.info(f"Applied technical terms correction")
+
+                    # Clean up Spanish text with LLM or simple processor
+                    try:
+                        if self.qwen_processor and self.qwen_processor.is_initialized:
+                            cleaned_text = self.qwen_processor.clean_spanish_text(transcribed_text)
+                            # Validate cleaned text
+                            if 'assistant' in cleaned_text.lower() or cleaned_text.count('\n') > 2:
+                                logger.warning(f"LLM output suspicious, using raw text")
+                                cleaned_text = transcribed_text
+                            else:
+                                logger.info(f"LLM cleaned text: {cleaned_text[:50]}...")
+                        else:
+                            cleaned_text = self.simple_processor.clean_spanish_text(transcribed_text)
+                            logger.info(f"Simple cleaned text: {cleaned_text[:50]}...")
+                        return cleaned_text, confidence
+                    except Exception as e:
+                        logger.warning(f"Text cleaning failed: {e}, using raw text")
+                        return transcribed_text, confidence
+
+                # Fallback to OpenAI Whisper
                 start_time = time.time()
 
                 # Check if file exists
@@ -404,6 +467,10 @@ class ModelManager:
 
     def cleanup(self):
         try:
+            if self.faster_whisper:
+                self.faster_whisper.cleanup()
+                self.faster_whisper = None
+
             if self.whisper_model:
                 del self.whisper_model
                 self.whisper_model = None
@@ -411,6 +478,10 @@ class ModelManager:
             if self.translation_pipeline:
                 del self.translation_pipeline
                 self.translation_pipeline = None
+
+            if self.qwen_processor:
+                self.qwen_processor.cleanup()
+                self.qwen_processor = None
 
             gc.collect()
             torch.cuda.empty_cache() if torch.cuda.is_available() else None

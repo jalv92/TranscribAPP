@@ -90,12 +90,18 @@ class TrayApp:
         self.stop()
 
     def setup_menu(self):
+        # Get AI status from config
+        ai_enabled = self.config.get('llm', {}).get('enabled', True)
+        ai_status = "🤖 AI Enhancement: ON" if ai_enabled else "🔧 AI Enhancement: OFF"
+
         return pystray.Menu(
             pystray.MenuItem(
                 "🎤 Record (Ctrl+Shift+R)",
                 self.on_record_click,
                 default=True
             ),
+            pystray.MenuItem(ai_status, None, enabled=False),  # Status indicator (non-clickable)
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("⚙️ Settings", self.on_settings_click),
             pystray.MenuItem("📋 History", self.show_history),
             pystray.Menu.SEPARATOR,
@@ -362,6 +368,117 @@ class SettingsWindow:
         self.widgets['translation_model'].insert(0, self.config['translation']['model_name'])
         self.widgets['translation_model'].pack(padx=20, pady=5)
 
+        # AI Enhancement Section
+        ai_frame = ctk.CTkFrame(frame)
+        ai_frame.pack(fill="x", padx=20, pady=20)
+
+        ctk.CTkLabel(ai_frame, text="AI Enhancement Settings", font=("Arial", 14, "bold")).pack(pady=10)
+
+        self.widgets['llm_enabled'] = ctk.CTkCheckBox(
+            ai_frame,
+            text="Enable AI Enhancement for translations",
+            command=self.toggle_llm_options
+        )
+        if self.config.get('llm', {}).get('enabled', True):
+            self.widgets['llm_enabled'].select()
+        self.widgets['llm_enabled'].pack(padx=20, pady=5)
+
+        # Model selector
+        model_frame = ctk.CTkFrame(ai_frame)
+        model_frame.pack(fill="x", padx=20, pady=10)
+
+        ctk.CTkLabel(model_frame, text="LLM Model:").pack(anchor="w", pady=(5, 0))
+
+        # Scan for available models
+        from model_scanner import ModelScanner
+        scanner = ModelScanner("LLM")
+        available_models = scanner.scan_models()
+
+        # Create model dropdown
+        model_options = []
+        self.model_details = {}  # Store full model info
+
+        if available_models:
+            for model in available_models:
+                display_name = f"{model['name']} ({model['size_gb']}GB)"
+                if not model['is_installed']:
+                    display_name += " [Incomplete]"
+                model_options.append(display_name)
+                self.model_details[display_name] = model
+        else:
+            model_options = ["No models found - Add models to LLM folder"]
+
+        self.widgets['llm_model'] = ctk.CTkComboBox(
+            model_frame,
+            values=model_options,
+            width=400,
+            command=self.on_model_selected
+        )
+
+        # Set current model
+        current_model = self.config.get('llm', {}).get('model_path', 'LLM/Qwen2.5-3B-Instruct')
+        current_model_name = os.path.basename(current_model)
+
+        # Find and select current model in dropdown
+        for display_name, details in self.model_details.items():
+            if details['id'] == current_model_name:
+                self.widgets['llm_model'].set(display_name)
+                break
+        else:
+            if model_options:
+                self.widgets['llm_model'].set(model_options[0])
+
+        self.widgets['llm_model'].pack(pady=5)
+
+        # Model info label
+        self.model_info_label = ctk.CTkLabel(
+            model_frame,
+            text="",
+            justify="left",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        self.model_info_label.pack(pady=5)
+
+        # Update model info for selected model
+        self.on_model_selected(self.widgets['llm_model'].get())
+
+        # Download models button
+        download_btn = ctk.CTkButton(
+            model_frame,
+            text="📥 Download More Models",
+            command=self.show_download_guide,
+            width=200
+        )
+        download_btn.pack(pady=10)
+
+        self.widgets['enhance_translation'] = ctk.CTkCheckBox(
+            ai_frame,
+            text="Enhance translations with AI (better fluency)"
+        )
+        if self.config.get('llm', {}).get('enhance_translation', True):
+            self.widgets['enhance_translation'].select()
+        self.widgets['enhance_translation'].pack(padx=20, pady=5)
+
+        # Info label about AI enhancement
+        info_text = """When AI Enhancement is disabled:
+• Basic text cleaning will still work
+• Translations will be more literal
+• Processing will be faster
+• Less memory usage"""
+
+        info_label = ctk.CTkLabel(
+            ai_frame,
+            text=info_text,
+            justify="left",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        info_label.pack(padx=20, pady=10)
+
+        # Update the state of enhance_translation based on llm_enabled
+        self.toggle_llm_options()
+
         self.widgets['use_gpu'] = ctk.CTkCheckBox(
             frame,
             text="Use GPU acceleration (if available)"
@@ -383,6 +500,87 @@ class SettingsWindow:
         self.widgets['toggle_hotkey'] = ctk.CTkEntry(frame, width=200)
         self.widgets['toggle_hotkey'].insert(0, self.config['hotkeys']['toggle_enabled'])
         self.widgets['toggle_hotkey'].pack(padx=20, pady=5)
+
+    def on_model_selected(self, selected_value):
+        """Update model info when a model is selected"""
+        if hasattr(self, 'model_details') and selected_value in self.model_details:
+            model = self.model_details[selected_value]
+            info_text = f"""Provider: {model['provider']}
+Quality: {model['quality'].capitalize()} | Speed: {model['speed'].capitalize()}
+Memory Required: {model['memory_required_gb']}GB RAM
+{model['description']}"""
+
+            if not model['is_installed']:
+                info_text += "\n⚠️ Model files incomplete - download required"
+
+            if hasattr(self, 'model_info_label'):
+                self.model_info_label.configure(text=info_text)
+
+    def show_download_guide(self):
+        """Show guide for downloading additional models"""
+        def create_download_window():
+            download_window = tk.Tk()
+            download_window.withdraw()
+
+            guide_text = """Model Download Guide
+
+RECOMMENDED MODELS:
+
+1. Llama 3.2 3B (Meta) - Best English fluency
+   • Download: https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct
+   • Size: 6GB
+   • Place in: LLM/Llama-3.2-3B-Instruct/
+
+2. Llama 3.2 1B (Meta) - Lightweight option
+   • Download: https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct
+   • Size: 2GB (saves 4GB vs Qwen)
+   • Place in: LLM/Llama-3.2-1B-Instruct/
+
+3. Phi 3.5 Mini (Microsoft) - Good balance
+   • Download: https://huggingface.co/microsoft/Phi-3.5-mini-instruct
+   • Size: 3GB
+   • Place in: LLM/Phi-3.5-mini-instruct/
+
+4. Gemma 2 2B (Google) - Efficient
+   • Download: https://huggingface.co/google/gemma-2-2b-it
+   • Size: 4GB
+   • Place in: LLM/gemma-2-2b-it/
+
+HOW TO DOWNLOAD:
+1. Click the HuggingFace link
+2. Click "Files and versions" tab
+3. Download ALL files to the model folder
+4. Restart TranscribeApp
+5. Select the model in Settings
+
+Using Git LFS (easier):
+git lfs install
+cd LLM
+git clone [huggingface-url]"""
+
+            messagebox.showinfo("Download Models", guide_text)
+            download_window.destroy()
+
+        threading.Thread(target=create_download_window, daemon=True).start()
+
+    def toggle_llm_options(self):
+        """Enable/disable LLM-related options based on main toggle"""
+        if hasattr(self, 'widgets') and 'llm_enabled' in self.widgets:
+            is_enabled = self.widgets['llm_enabled'].get()
+
+            # Enable/disable model selector
+            if 'llm_model' in self.widgets:
+                if is_enabled:
+                    self.widgets['llm_model'].configure(state="normal")
+                else:
+                    self.widgets['llm_model'].configure(state="disabled")
+
+            # Enable/disable enhance translation
+            if 'enhance_translation' in self.widgets:
+                if is_enabled:
+                    self.widgets['enhance_translation'].configure(state="normal")
+                else:
+                    self.widgets['enhance_translation'].configure(state="disabled")
 
     def create_advanced_tab(self, parent):
         frame = ctk.CTkFrame(parent)
@@ -434,6 +632,20 @@ class SettingsWindow:
 
             self.config['whisper']['model_size'] = self.widgets['whisper_model'].get()
             self.config['translation']['model_name'] = self.widgets['translation_model'].get()
+
+            # Save LLM settings
+            if 'llm' not in self.config:
+                self.config['llm'] = {}
+            self.config['llm']['enabled'] = self.widgets['llm_enabled'].get()
+            self.config['llm']['enhance_translation'] = self.widgets['enhance_translation'].get()
+
+            # Save selected model
+            if 'llm_model' in self.widgets:
+                selected_model = self.widgets['llm_model'].get()
+                if hasattr(self, 'model_details') and selected_model in self.model_details:
+                    model_info = self.model_details[selected_model]
+                    self.config['llm']['model_path'] = model_info['path']
+                    self.config['llm']['model_id'] = model_info['id']
 
             self.config['hotkeys']['record'] = self.widgets['record_hotkey'].get()
             self.config['hotkeys']['toggle_enabled'] = self.widgets['toggle_hotkey'].get()
