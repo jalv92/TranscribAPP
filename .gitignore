@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific
+*.log
+transcription_history.json
+temp/
+recordings/
+*.wav
+*.mp3
+*.m4a
+
+# Large folders (not for repo)
+LLM/
+models/
+tools/ffmpeg/
+data/
+
+# Temporary files
+*.tmp
+.cache/
+
+# Distribution
+*.spec
+*.exe
+*.msi
+*.dmg
+*.pkg
+*.deb
+*.rpm
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Config with sensitive data (optional - uncomment if needed)
+# config.json

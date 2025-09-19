@@ -1,0 +1,61 @@
+{
+    "audio": {
+        "sample_rate": 16000,
+        "channels": 1,
+        "buffer_duration": 120,
+        "silence_threshold": 0.020000000000000004,
+        "silence_duration": 3.0,
+        "format": "float32",
+        "input_device": 1
+    },
+    "whisper": {
+        "model_size": "small",
+        "language": "spanish",
+        "task": "transcribe",
+        "fp16": false,
+        "device": "cpu"
+    },
+    "translation": {
+        "model_name": "Helsinki-NLP/opus-mt-es-en",
+        "max_length": 512,
+        "batch_size": 1,
+        "device": "cpu"
+    },
+    "hotkeys": {
+        "record": "ctrl+shift+r",
+        "toggle_enabled": "ctrl+shift+t"
+    },
+    "ui": {
+        "theme": "dark",
+        "show_notifications": 1,
+        "notification_duration": 3,
+        "tray_icon": true
+    },
+    "performance": {
+        "max_recording_duration": 300,
+        "processing_timeout": 10,
+        "model_cache": 1
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "transcribe_app.log",
+        "max_size": "10MB",
+        "backup_count": 3
+    },
+    "llm": {
+        "enabled": true,
+        "enhance_translation": true,
+        "model_path": "LLM/Qwen2.5-3B-Instruct",
+        "max_tokens": 50,
+        "temperature": 0.1,
+        "use_4bit": true,
+        "device": "auto"
+    },
+    "quality": {
+        "confidence_threshold": -1.0,
+        "min_audio_length": 0.5,
+        "reject_non_spanish": false,
+        "filter_hallucinations": true,
+        "fix_technical_terms": true
+    }
+}
